@@ -207,7 +207,7 @@ async function start() {
     // tradeoff.
     const canvas = makeLabelCanvas(`Tote ${toteId}`, "loading…");
     const texture = new THREE.CanvasTexture(canvas);
-    const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
+    const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide });
     const geometry = new THREE.PlaneGeometry(CONFIG.labelWidth, CONFIG.labelHeight);
     const mesh = new THREE.Mesh(geometry, material);
     mesh.visible = false;
