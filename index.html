@@ -223,27 +223,26 @@ async function start() {
     const anchor = mindarThree.addAnchor(index);
     anchorRefs[toteId] = anchor;
 
-    // Build the label mesh, but DO NOT parent it to the anchor group —
-    // that's what caused the old app's perspective warp. We keep it as
-    // a sibling in the scene and manually copy over only POSITION each
-    // frame, then force it to face the camera (billboarding) with a
-    // clamped scale. This is the "flatten it, sacrifice full 3D pose"
-    // tradeoff.
+    // Parent the label to the anchor group, like MindAR expects — this
+    // is what makes position/scale come out correct automatically.
+    // Each frame, we still cancel out the anchor's rotation so the
+    // label faces the camera flat (billboard) instead of tilting with
+    // the tote, without fighting the coordinate system.
     const canvas = makeLabelCanvas(`Tote ${toteId}`, "loading…");
     const texture = new THREE.CanvasTexture(canvas);
     const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide });
     const geometry = new THREE.PlaneGeometry(CONFIG.labelWidth, CONFIG.labelHeight);
     const mesh = new THREE.Mesh(geometry, material);
     mesh.visible = false;
+    mesh.position.set(0, 0.75, 0); // sits just above the marker, in the anchor's local space
     labelMeshes[toteId] = mesh;
-    scene.add(mesh);
+    anchor.group.add(mesh);
 
     anchor.onTargetFound = () => {
       visibleTotes.add(toteId);
       mesh.visible = true;
       updateLabelText(toteId);
       setStatus(`Tracking ${visibleTotes.size} tote(s)`, "ok");
-      console.log(`DIAG: tote ${toteId} found. mesh.visible=${mesh.visible}, has texture=${!!mesh.material.map}, anchor.group.visible=${anchor.group.visible}`);
     };
     anchor.onTargetLost = () => {
       visibleTotes.delete(toteId);
@@ -259,8 +258,8 @@ async function start() {
   refreshSheetData();
   setInterval(refreshSheetData, CONFIG.refreshMs);
 
-  const tmpPos = new THREE.Vector3();
-  const tmpCamPos = new THREE.Vector3();
+  const camWorldQuat = new THREE.Quaternion();
+  const anchorWorldQuat = new THREE.Quaternion();
   let diagFrameLogged = false;
 
   renderer.setAnimationLoop(() => {
@@ -269,31 +268,19 @@ async function start() {
       console.log("DIAG: render loop is running, first frame fired");
     }
     camera.updateWorldMatrix(true, false);
-    camera.getWorldPosition(tmpCamPos);
+    camera.getWorldQuaternion(camWorldQuat);
 
     for (const toteId of CONFIG.toteIds) {
       const anchor = anchorRefs[toteId];
       const mesh = labelMeshes[toteId];
       if (!mesh.visible) continue;
 
-      // position: sit slightly above where the anchor is tracking
-      anchor.group.getWorldPosition(tmpPos);
-      tmpPos.y += 0.28;
-      mesh.position.copy(tmpPos);
-
-      // billboard: always face the camera instead of tilting with the tote
-      mesh.quaternion.copy(camera.quaternion);
-
-      // clamped scale: shrink a little with distance, but never past min/max
-      const dist = tmpPos.distanceTo(tmpCamPos);
-      const scale = THREE.MathUtils.clamp(1.15 - dist * 0.12, CONFIG.minPixelScale, CONFIG.maxPixelScale);
-      mesh.scale.setScalar(scale);
-
-      const now = performance.now();
-      if (!mesh._lastDiagLog || now - mesh._lastDiagLog > 1000) {
-        mesh._lastDiagLog = now;
-        console.log(`DIAG tote ${toteId}: pos=(${tmpPos.x.toFixed(2)},${tmpPos.y.toFixed(2)},${tmpPos.z.toFixed(2)}) camPos=(${tmpCamPos.x.toFixed(2)},${tmpCamPos.y.toFixed(2)},${tmpCamPos.z.toFixed(2)}) dist=${dist.toFixed(2)} scale=${scale.toFixed(2)}`);
-      }
+      // billboard: cancel out the anchor's own rotation, then apply the
+      // camera's, so the label ends up facing the camera flat instead
+      // of tilting with the tote — while position/scale still come
+      // from the normal parent-child transform (correct units).
+      anchor.group.getWorldQuaternion(anchorWorldQuat);
+      mesh.quaternion.copy(anchorWorldQuat.clone().invert().multiply(camWorldQuat));
     }
 
     renderer.render(scene, camera);
