@@ -62,7 +62,7 @@ const CONFIG = {
   //   - Row 1 = headers, e.g.: ToteID | Contents
   //   - API key restricted to the Sheets API + your hosting domain
   sheetId: "1ezihzjsOJU_58w5Xmvtqr1hJjRiQKiw_8LZbUCjFDW8",
-  sheetRange: "Sheet1!A2:B31",
+  sheetRange: "A2:B31",
   apiKey: "AIzaSyD183-RFGtvj0xJ2aGsvCbE98uYEce9fCo",
 
   // How often to re-pull the sheet while the app is open (ms)
@@ -109,7 +109,11 @@ async function refreshSheetData() {
     const updated = {};
     for (const row of rows) {
       const [id, contents] = row;
-      if (id) updated[String(id).trim()] = contents || "(no contents listed)";
+      if (!id) continue;
+      const match = String(id).match(/(\d+)/);
+      if (!match) continue;
+      const numericId = parseInt(match[1], 10); // "Tote 01" -> 1
+      updated[numericId] = contents || "(no contents listed)";
     }
     toteData = updated;
     // refresh any labels currently showing
