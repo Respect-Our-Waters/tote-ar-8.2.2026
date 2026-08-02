@@ -244,15 +244,22 @@ async function start() {
     };
   });
 
+  console.log("DIAG: calling mindarThree.start()...");
   await mindarThree.start();
+  console.log("DIAG: mindarThree.start() resolved OK");
   setStatus("Point camera at a tote marker");
   refreshSheetData();
   setInterval(refreshSheetData, CONFIG.refreshMs);
 
   const tmpPos = new THREE.Vector3();
   const tmpCamPos = new THREE.Vector3();
+  let diagFrameLogged = false;
 
   renderer.setAnimationLoop(() => {
+    if (!diagFrameLogged) {
+      diagFrameLogged = true;
+      console.log("DIAG: render loop is running, first frame fired");
+    }
     camera.getWorldPosition(tmpCamPos);
 
     for (const toteId of CONFIG.toteIds) {
