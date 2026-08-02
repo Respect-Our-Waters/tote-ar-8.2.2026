@@ -214,21 +214,10 @@ async function start() {
 
   // TEMPORARY: fully opaque magenta clear, to prove this canvas
   // is visible at all, independent of any object position math.
-  renderer.setClearColor(0xff00ff, 1);
+  renderer.setClearColor(0x000000, 0);
 
   // Soft light so canvas textures render true-color
   scene.add(new THREE.AmbientLight(0xffffff, 1.0));
-
-  // TEMPORARY DIAGNOSTIC: a bright box that always floats ~1.2 units in
-  // front of the camera, regardless of marker tracking. If this isn't
-  // visible, the problem is in basic rendering setup. If it IS visible,
-  // the problem is specifically in the anchor/tracking position data.
-  const debugBox = new THREE.Mesh(
-    new THREE.BoxGeometry(0.3, 0.3, 0.3),
-    new THREE.MeshBasicMaterial({ color: 0xff00ff })
-  );
-  scene.add(debugBox);
-  const debugForward = new THREE.Vector3();
 
   CONFIG.toteIds.forEach((toteId, index) => {
     const anchor = mindarThree.addAnchor(index);
@@ -280,8 +269,6 @@ async function start() {
     }
     camera.updateWorldMatrix(true, false);
     camera.getWorldPosition(tmpCamPos);
-    camera.getWorldDirection(debugForward);
-    debugBox.position.copy(tmpCamPos).add(debugForward.multiplyScalar(1.2));
 
     for (const toteId of CONFIG.toteIds) {
       const anchor = anchorRefs[toteId];
