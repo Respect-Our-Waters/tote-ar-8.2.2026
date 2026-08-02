@@ -243,6 +243,7 @@ async function start() {
       mesh.visible = true;
       updateLabelText(toteId);
       setStatus(`Tracking ${visibleTotes.size} tote(s)`, "ok");
+      console.log(`DIAG: tote ${toteId} found. mesh.visible=${mesh.visible}, has texture=${!!mesh.material.map}, anchor.group.visible=${anchor.group.visible}`);
     };
     anchor.onTargetLost = () => {
       visibleTotes.delete(toteId);
@@ -287,6 +288,12 @@ async function start() {
       const dist = tmpPos.distanceTo(tmpCamPos);
       const scale = THREE.MathUtils.clamp(1.15 - dist * 0.12, CONFIG.minPixelScale, CONFIG.maxPixelScale);
       mesh.scale.setScalar(scale);
+
+      const now = performance.now();
+      if (!mesh._lastDiagLog || now - mesh._lastDiagLog > 1000) {
+        mesh._lastDiagLog = now;
+        console.log(`DIAG tote ${toteId}: pos=(${tmpPos.x.toFixed(2)},${tmpPos.y.toFixed(2)},${tmpPos.z.toFixed(2)}) camPos=(${tmpCamPos.x.toFixed(2)},${tmpCamPos.y.toFixed(2)},${tmpCamPos.z.toFixed(2)}) dist=${dist.toFixed(2)} scale=${scale.toFixed(2)}`);
+      }
     }
 
     renderer.render(scene, camera);
