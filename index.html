@@ -7,6 +7,11 @@
 <style>
   html, body { margin: 0; padding: 0; overflow: hidden; height: 100%; background: #000; }
   #container { position: fixed; inset: 0; width: 100vw; height: 100vh; }
+  /* MindAR appends the video's wrapper AFTER the canvas in the DOM,
+     which by default paints it on top and hides everything the
+     canvas draws (labels, debug box, etc). Force the correct order. */
+  #container canvas { z-index: 2 !important; }
+  #container > div { z-index: 1 !important; }
   #status {
     position: fixed; top: 0; left: 0; right: 0; z-index: 10;
     background: rgba(0,0,0,0.65); color: #fff; font: 14px/1.4 -apple-system, system-ui, sans-serif;
