@@ -19,9 +19,15 @@
   }
   #status.ok { background: rgba(20,120,20,0.65); }
   #status.err { background: rgba(160,20,20,0.75); }
+  #ar-overlay {
+    position: fixed; inset: 0; width: 100vw; height: 100vh;
+    z-index: 9999; pointer-events: none;
+  }
 </style>
 </head>
 <body>
+
+<canvas id="ar-overlay"></canvas>
 
 <div id="container"></div>
 <div id="status">Loading camera…</div>
@@ -191,11 +197,22 @@ async function start() {
     filterBeta: 1000,
   });
 
-  const { renderer, scene, camera } = mindarThree;
+  const { scene, camera } = mindarThree;
 
-  // Without this, the canvas clears to opaque black every frame and
-  // hides the camera feed underneath it, even though alpha is enabled.
-  // TEMPORARY: fully opaque magenta clear, to prove the canvas itself
+  // Render into OUR OWN canvas (#ar-overlay) instead of MindAR's internal
+  // one — something about the internal canvas wasn't actually visible
+  // on screen despite correct z-index/stacking, so we sidestep it
+  // entirely with a canvas we fully control.
+  const arCanvas = document.getElementById("ar-overlay");
+  const renderer = new THREE.WebGLRenderer({ canvas: arCanvas, alpha: true, antialias: true });
+  renderer.setPixelRatio(window.devicePixelRatio || 1);
+  function resizeOverlay() {
+    renderer.setSize(window.innerWidth, window.innerHeight, false);
+  }
+  resizeOverlay();
+  window.addEventListener("resize", resizeOverlay);
+
+  // TEMPORARY: fully opaque magenta clear, to prove this canvas
   // is visible at all, independent of any object position math.
   renderer.setClearColor(0xff00ff, 1);
 
