@@ -193,8 +193,10 @@ async function start() {
     container: document.querySelector("#container"),
     imageTargetSrc: CONFIG.targetFile,
     maxTrack: CONFIG.toteIds.length,
-    filterMinCF: 0.0001,   // smoothing: lower = smoother but more lag
-    filterBeta: 1000,
+    filterMinCF: 0.001,    // higher = more smoothing on jitter (was 0.0001)
+    filterBeta: 100,       // lower = less twitchy response to fast movement (was 1000)
+    warmupTolerance: 10,   // require ~10 consistent frames before declaring "found"
+    missTolerance: 10,     // allow ~10 missed frames before declaring "lost" (less flicker)
   });
 
   const { scene, camera } = mindarThree;
