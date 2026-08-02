@@ -6,6 +6,7 @@
 <title>Tote Finder</title>
 <style>
   html, body { margin: 0; padding: 0; overflow: hidden; height: 100%; background: #000; }
+  #container { position: fixed; inset: 0; width: 100vw; height: 100vh; }
   #status {
     position: fixed; top: 0; left: 0; right: 0; z-index: 10;
     background: rgba(0,0,0,0.65); color: #fff; font: 14px/1.4 -apple-system, system-ui, sans-serif;
@@ -17,6 +18,7 @@
 </head>
 <body>
 
+<div id="container"></div>
 <div id="status">Loading camera…</div>
 
 <script type="importmap">
@@ -177,7 +179,7 @@ function updateLabelText(toteId) {
    ============================================================ */
 async function start() {
   const mindarThree = new MindARThree({
-    container: document.body,
+    container: document.querySelector("#container"),
     imageTargetSrc: CONFIG.targetFile,
     maxTrack: CONFIG.toteIds.length,
     filterMinCF: 0.0001,   // smoothing: lower = smoother but more lag
