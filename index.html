@@ -186,6 +186,10 @@ async function start() {
 
   const { renderer, scene, camera } = mindarThree;
 
+  // Without this, the canvas clears to opaque black every frame and
+  // hides the camera feed underneath it, even though alpha is enabled.
+  renderer.setClearColor(0x000000, 0);
+
   // Soft light so canvas textures render true-color
   scene.add(new THREE.AmbientLight(0xffffff, 1.0));
 
