@@ -203,8 +203,9 @@ async function start() {
     new THREE.BoxGeometry(0.3, 0.3, 0.3),
     new THREE.MeshBasicMaterial({ color: 0xff00ff })
   );
-  scene.add(debugBox);
-  const debugForward = new THREE.Vector3();
+  debugBox.position.set(0, 0, -1.2);
+  camera.add(debugBox);
+  if (!camera.parent) scene.add(camera);
 
   CONFIG.toteIds.forEach((toteId, index) => {
     const anchor = mindarThree.addAnchor(index);
@@ -248,8 +249,6 @@ async function start() {
 
   renderer.setAnimationLoop(() => {
     camera.getWorldPosition(tmpCamPos);
-    camera.getWorldDirection(debugForward);
-    debugBox.position.copy(tmpCamPos).add(debugForward.multiplyScalar(1.2));
 
     for (const toteId of CONFIG.toteIds) {
       const anchor = anchorRefs[toteId];
