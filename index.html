@@ -196,7 +196,7 @@ async function start() {
   const mindarThree = new MindARThree({
     container: document.querySelector("#container"),
     imageTargetSrc: CONFIG.targetFile,
-    maxTrack: CONFIG.toteIds.length,
+    maxTrack: 1, // TEMPORARY: testing with only 1 simultaneous target to isolate the false-detection issue
     filterMinCF: 0.001,    // higher = more smoothing on jitter (was 0.0001)
     filterBeta: 100,       // lower = less twitchy response to fast movement (was 1000)
     warmupTolerance: 10,   // require ~10 consistent frames before declaring "found"
