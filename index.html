@@ -256,6 +256,8 @@ async function start() {
       const scale = THREE.MathUtils.clamp(1.15 - dist * 0.12, CONFIG.minPixelScale, CONFIG.maxPixelScale);
       mesh.scale.setScalar(scale);
     }
+
+    renderer.render(scene, camera);
   });
 }
 
