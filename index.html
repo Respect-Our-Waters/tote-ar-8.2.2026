@@ -196,11 +196,11 @@ async function start() {
   const mindarThree = new MindARThree({
     container: document.querySelector("#container"),
     imageTargetSrc: CONFIG.targetFile,
-    maxTrack: 1, // TEMPORARY: testing with only 1 simultaneous target to isolate the false-detection issue
-    filterMinCF: 0.001,    // higher = more smoothing on jitter (was 0.0001)
-    filterBeta: 100,       // lower = less twitchy response to fast movement (was 1000)
-    warmupTolerance: 10,   // require ~10 consistent frames before declaring "found"
-    missTolerance: 10,     // allow ~10 missed frames before declaring "lost" (less flicker)
+    maxTrack: CONFIG.toteIds.length,
+    filterMinCF: 0.01,     // much stronger smoothing (was 0.001)
+    filterBeta: 20,        // much less twitchy (was 100)
+    warmupTolerance: 25,   // require ~25 consistent frames before declaring "found" (was 10)
+    missTolerance: 20,     // allow ~20 missed frames before declaring "lost" (was 10)
   });
 
   const { scene, camera } = mindarThree;
