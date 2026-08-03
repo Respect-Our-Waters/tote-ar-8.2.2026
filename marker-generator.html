@@ -22,7 +22,7 @@
     box-sizing: border-box; padding: 0.5in;
     page-break-after: always;
   }
-  .page .qr-wrap { }
+  .page svg { width: 5.5in; height: 5.5in; }
   .page .label { font-size: 60px; font-weight: 800; margin-top: 30px; text-align: center; }
   @media print {
     body { background: #fff; margin: 0; }
@@ -42,7 +42,7 @@
 
 <div id="pages"></div>
 
-<script src="https://unpkg.com/qrcode@1.5.0/build/qrcode.min.js"></script>
+<script src="qrcode-lib.js"></script>
 <script>
 function generate() {
   const start = parseInt(document.getElementById("startId").value, 10);
@@ -54,18 +54,16 @@ function generate() {
     const page = document.createElement("div");
     page.className = "page";
 
-    const qrWrap = document.createElement("div");
-    qrWrap.className = "qr-wrap";
-    page.appendChild(qrWrap);
-
-    const canvas = document.createElement("canvas");
-    qrWrap.appendChild(canvas);
-
     // Encode as "TOTE-<id>" — the app reads the first number it finds,
     // so this format (or a plain number) both work.
-    QRCode.toCanvas(canvas, `TOTE-${id}`, { width: 500, margin: 2 }, (err) => {
-      if (err) console.error(err);
-    });
+    const qr = qrcode(4, "M");
+    qr.addData(`TOTE-${id}`);
+    qr.make();
+    const svgMarkup = qr.createSvgTag(10, 20);
+
+    const qrWrap = document.createElement("div");
+    qrWrap.innerHTML = svgMarkup;
+    page.appendChild(qrWrap);
 
     const label = document.createElement("div");
     label.className = "label";
