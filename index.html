@@ -49,7 +49,7 @@ const CONFIG = {
 
   maxCodesPerFrame: 6,     // how many distinct QR codes to look for per scan
   scanIntervalMs: 150,     // how often to scan a frame (lower = more responsive, more CPU)
-  labelTTLms: 900,         // how long a label stays up after last successful detection
+  labelTTLms: 2500,        // how long a label stays up after last successful detection
   minLabelWidthPx: 90,     // clamped label size, like before — doesn't shrink/grow forever
   maxLabelWidthPx: 260,
 };
@@ -118,7 +118,7 @@ function findAllQRCodes(imageData, maxCodes) {
   const { width, height } = imageData;
 
   for (let i = 0; i < maxCodes; i++) {
-    const code = jsQR(data, width, height, { inversionAttempts: "dontInvert" });
+    const code = jsQR(data, width, height, { inversionAttempts: "attemptBoth" });
     if (!code) break;
     results.push(code);
     maskRegion(data, width, code.location);
@@ -206,38 +206,40 @@ function start() {
   const scanCtx = scanCanvas.getContext("2d", { willReadFrequently: true });
 
   function scanFrame() {
-    if (videoEl.videoWidth) {
-      scanCanvas.width = videoEl.videoWidth;
-      scanCanvas.height = videoEl.videoHeight;
-      scanCtx.drawImage(videoEl, 0, 0, scanCanvas.width, scanCanvas.height);
-      const imageData = scanCtx.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
-      const codes = findAllQRCodes(imageData, CONFIG.maxCodesPerFrame);
+    try {
+      if (videoEl.videoWidth) {
+        scanCanvas.width = videoEl.videoWidth;
+        scanCanvas.height = videoEl.videoHeight;
+        scanCtx.drawImage(videoEl, 0, 0, scanCanvas.width, scanCanvas.height);
+        const imageData = scanCtx.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
+        const codes = findAllQRCodes(imageData, CONFIG.maxCodesPerFrame);
 
-      const now = performance.now();
-      const seenThisFrame = new Set();
-      for (const code of codes) {
-        const match = code.data.match(/(\d+)/);
-        if (!match) continue;
-        const toteId = parseInt(match[1], 10);
-        seenThisFrame.add(toteId);
-        lastSeen[toteId] = now;
-        updateLabelContent(toteId);
-        placeLabel(toteId, code);
-      }
-
-      // hide labels not seen recently (handles brief flicker without
-      // hiding/showing constantly, but still clears stale ones)
-      for (const toteId of Object.keys(lastSeen)) {
-        const el = labelEls[toteId];
-        if (!el) continue;
-        if (now - lastSeen[toteId] > CONFIG.labelTTLms) {
-          el.style.opacity = "0";
-          el.style.display = "none";
+        const now = performance.now();
+        for (const code of codes) {
+          const match = code.data.match(/(\d+)/);
+          if (!match) continue;
+          const toteId = parseInt(match[1], 10);
+          lastSeen[toteId] = now;
+          placeLabel(toteId, code);      // creates the label element if needed
+          updateLabelContent(toteId);    // now safe to fill in its text
         }
-      }
 
-      const activeCount = Object.keys(lastSeen).filter(id => now - lastSeen[id] <= CONFIG.labelTTLms).length;
-      setStatus(activeCount ? `Tracking ${activeCount} tote(s)` : "Point camera at a tote QR code", activeCount ? "ok" : "");
+        // hide labels not seen recently (handles brief flicker without
+        // hiding/showing constantly, but still clears stale ones)
+        for (const toteId of Object.keys(lastSeen)) {
+          const el = labelEls[toteId];
+          if (!el) continue;
+          if (now - lastSeen[toteId] > CONFIG.labelTTLms) {
+            el.style.opacity = "0";
+            el.style.display = "none";
+          }
+        }
+
+        const activeCount = Object.keys(lastSeen).filter(id => now - lastSeen[id] <= CONFIG.labelTTLms).length;
+        setStatus(activeCount ? `Tracking ${activeCount} tote(s)` : "Point camera at a tote QR code", activeCount ? "ok" : "");
+      }
+    } catch (err) {
+      console.error("scanFrame error (continuing):", err);
     }
     setTimeout(scanFrame, CONFIG.scanIntervalMs);
   }
