@@ -6,12 +6,19 @@
 <title>Tote Finder</title>
 <style>
   html, body { margin: 0; padding: 0; overflow: hidden; height: 100%; background: #000; }
-  #container { position: fixed; inset: 0; width: 100vw; height: 100vh; }
-  /* MindAR appends the video's wrapper AFTER the canvas in the DOM,
-     which by default paints it on top and hides everything the
-     canvas draws (labels, debug box, etc). Force the correct order. */
-  #container canvas { z-index: 2 !important; }
-  #container > div { z-index: 1 !important; }
+  #video {
+    position: fixed; inset: 0; width: 100vw; height: 100vh;
+    object-fit: cover; background: #000;
+  }
+  #labels { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; }
+  .tote-label {
+    position: absolute; transform: translate(-50%, -100%);
+    background: rgba(255,255,255,0.95); border: 3px solid #111; border-radius: 14px;
+    padding: 8px 14px; font: 14px/1.3 -apple-system, system-ui, sans-serif; color: #111;
+    max-width: 240px; box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+    transition: left 0.1s linear, top 0.1s linear, opacity 0.2s linear;
+  }
+  .tote-label .title { font-weight: 700; font-size: 16px; display: block; margin-bottom: 2px; }
   #status {
     position: fixed; top: 0; left: 0; right: 0; z-index: 10;
     background: rgba(0,0,0,0.65); color: #fff; font: 14px/1.4 -apple-system, system-ui, sans-serif;
@@ -19,87 +26,54 @@
   }
   #status.ok { background: rgba(20,120,20,0.65); }
   #status.err { background: rgba(160,20,20,0.75); }
-  #ar-overlay {
-    position: fixed; inset: 0; width: 100vw; height: 100vh;
-    z-index: 9999; pointer-events: none;
-  }
 </style>
 </head>
 <body>
 
-<canvas id="ar-overlay"></canvas>
-
-<div id="container"></div>
 <div id="status">Loading camera…</div>
+<video id="video" autoplay muted playsinline></video>
+<div id="labels"></div>
 
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
-    "mindar-image-three": "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"
-  }
-}
-</script>
-
-<script type="module">
-import * as THREE from "three";
-import { MindARThree } from "mindar-image-three";
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<script>
 /* ============================================================
-   CONFIG — fill these in before running
+   CONFIG
    ============================================================ */
 const CONFIG = {
-  // Path to the .mind file you compile from the 4 marker PNGs
-  // (see the "compiling your markers" step in the README)
-  targetFile: "./targets.mind",
-
-  // How many markers are in that .mind file, in compile order.
-  // The prototype set is tote_01.png .. tote_04.png -> IDs 1-4.
-  toteIds: [1, 2, 3, 4],
-
-  // Google Sheet setup:
-  //   - Sheet shared as "Anyone with the link can view"
-  //   - Row 1 = headers, e.g.: ToteID | Contents
-  //   - API key restricted to the Sheets API + your hosting domain
+  // Google Sheet: column A = tote ID (matches text in the QR code,
+  // e.g. "TOTE-1" or just "1" — either works), column B = contents.
   sheetId: "1ezihzjsOJU_58w5Xmvtqr1hJjRiQKiw_8LZbUCjFDW8",
   sheetRange: "A2:B31",
   apiKey: "AIzaSyD183-RFGtvj0xJ2aGsvCbE98uYEce9fCo",
-
-  // How often to re-pull the sheet while the app is open (ms)
   refreshMs: 30000,
 
-  // Label sizing — this is the "clamped scale" behavior:
-  // label stays this many world-units tall regardless of distance,
-  // but never renders smaller/larger than the min/max screen size.
-  labelWidth: 0.85,     // world units (roughly matches marker width)
-  labelHeight: 0.32,
-  minPixelScale: 0.55,  // don't shrink past this even far away
-  maxPixelScale: 1.3,   // don't grow past this up close
+  maxCodesPerFrame: 6,     // how many distinct QR codes to look for per scan
+  scanIntervalMs: 150,     // how often to scan a frame (lower = more responsive, more CPU)
+  labelTTLms: 900,         // how long a label stays up after last successful detection
+  minLabelWidthPx: 90,     // clamped label size, like before — doesn't shrink/grow forever
+  maxLabelWidthPx: 260,
 };
 
 /* ============================================================
    STATE
    ============================================================ */
 const statusEl = document.getElementById("status");
+const videoEl = document.getElementById("video");
+const labelsEl = document.getElementById("labels");
 function setStatus(text, cls) {
   statusEl.textContent = text;
   statusEl.className = cls || "";
 }
 
-let toteData = {}; // { "1": "hoses, gloves, spare filters", ... }
-const labelMeshes = {}; // toteId -> THREE.Mesh
-const anchorRefs = {};  // toteId -> mindar anchor object
-const visibleTotes = new Set();
+let toteData = {};          // { "1": "gloves, bags, broom", ... }
+const labelEls = {};        // toteId -> DOM element
+const lastSeen = {};        // toteId -> timestamp
 
 /* ============================================================
-   GOOGLE SHEETS LOOKUP
+   GOOGLE SHEETS LOOKUP (same approach as before — proven working)
    ============================================================ */
 async function refreshSheetData() {
   const { sheetId, sheetRange, apiKey } = CONFIG;
-  if (sheetId.startsWith("PASTE_") || apiKey.startsWith("PASTE_")) {
-    setStatus("Add your Sheet ID + API key in CONFIG (top of index.html)", "err");
-    return;
-  }
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${encodeURIComponent(sheetRange)}?key=${apiKey}`;
   try {
     const res = await fetch(url);
@@ -112,191 +86,179 @@ async function refreshSheetData() {
       if (!id) continue;
       const match = String(id).match(/(\d+)/);
       if (!match) continue;
-      const numericId = parseInt(match[1], 10); // "Tote 01" -> 1
-      updated[numericId] = contents || "(no contents listed)";
+      updated[parseInt(match[1], 10)] = contents || "(no contents listed)";
     }
     toteData = updated;
-    // refresh any labels currently showing
-    for (const toteId of visibleTotes) updateLabelText(toteId);
   } catch (err) {
     console.error("Sheet fetch failed:", err);
-    setStatus("Couldn't reach the Google Sheet — check API key / sharing settings", "err");
   }
 }
 
 /* ============================================================
-   LABEL TEXTURE (canvas-drawn text -> texture on a plane)
+   CAMERA SETUP
    ============================================================ */
-function makeLabelCanvas(title, body) {
-  const canvas = document.createElement("canvas");
-  canvas.width = 640; canvas.height = 240;
-  const ctx = canvas.getContext("2d");
-
-  // card background
-  ctx.fillStyle = "rgba(255,255,255,0.95)";
-  roundRect(ctx, 4, 4, canvas.width - 8, canvas.height - 8, 24);
-  ctx.fill();
-  ctx.strokeStyle = "rgba(0,0,0,0.85)";
-  ctx.lineWidth = 6;
-  roundRect(ctx, 4, 4, canvas.width - 8, canvas.height - 8, 24);
-  ctx.stroke();
-
-  ctx.fillStyle = "#111";
-  ctx.font = "bold 40px -apple-system, system-ui, sans-serif";
-  ctx.fillText(title, 28, 56);
-
-  ctx.font = "28px -apple-system, system-ui, sans-serif";
-  wrapText(ctx, body, 28, 104, canvas.width - 56, 34);
-
-  return canvas;
+async function startCamera() {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
+    audio: false,
+  });
+  videoEl.srcObject = stream;
+  await new Promise((resolve) => {
+    videoEl.onloadedmetadata = () => { videoEl.play(); resolve(); };
+  });
 }
 
-function roundRect(ctx, x, y, w, h, r) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
+/* ============================================================
+   QR SCANNING — find multiple codes per frame by masking out
+   each one found, then re-scanning the rest of the image.
+   ============================================================ */
+function findAllQRCodes(imageData, maxCodes) {
+  const results = [];
+  const data = new Uint8ClampedArray(imageData.data); // mutable copy
+  const { width, height } = imageData;
+
+  for (let i = 0; i < maxCodes; i++) {
+    const code = jsQR(data, width, height, { inversionAttempts: "dontInvert" });
+    if (!code) break;
+    results.push(code);
+    maskRegion(data, width, code.location);
+  }
+  return results;
 }
 
-function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
-  const words = String(text).split(" ");
-  let line = "";
-  let lines = 0;
-  for (const word of words) {
-    const test = line + word + " ";
-    if (ctx.measureText(test).width > maxWidth && line) {
-      ctx.fillText(line, x, y + lines * lineHeight);
-      line = word + " ";
-      lines++;
-      if (lines >= 4) { ctx.fillText(line.trim() + "…", x, y + lines * lineHeight); return; }
-    } else {
-      line = test;
+function maskRegion(data, width, location) {
+  const xs = [location.topLeftCorner.x, location.topRightCorner.x, location.bottomLeftCorner.x, location.bottomRightCorner.x];
+  const ys = [location.topLeftCorner.y, location.topRightCorner.y, location.bottomLeftCorner.y, location.bottomRightCorner.y];
+  const pad = 6;
+  const minX = Math.max(0, Math.floor(Math.min(...xs)) - pad);
+  const maxX = Math.ceil(Math.max(...xs)) + pad;
+  const minY = Math.max(0, Math.floor(Math.min(...ys)) - pad);
+  const maxY = Math.ceil(Math.max(...ys)) + pad;
+
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      const idx = (y * width + x) * 4;
+      if (idx < 0 || idx >= data.length) continue;
+      data[idx] = 128; data[idx + 1] = 128; data[idx + 2] = 128; // flat gray
     }
   }
-  ctx.fillText(line, x, y + lines * lineHeight);
 }
 
-function updateLabelText(toteId) {
-  const mesh = labelMeshes[toteId];
-  if (!mesh) return;
+/* ============================================================
+   LABEL POSITIONING — map video-pixel coords to on-screen CSS
+   coords, accounting for object-fit: cover cropping/scaling.
+   ============================================================ */
+function videoToScreen(vx, vy) {
+  const vw = videoEl.videoWidth, vh = videoEl.videoHeight;
+  const dw = window.innerWidth, dh = window.innerHeight;
+  const scale = Math.max(dw / vw, dh / vh);
+  const scaledW = vw * scale, scaledH = vh * scale;
+  const offsetX = (dw - scaledW) / 2;
+  const offsetY = (dh - scaledH) / 2;
+  return { x: vx * scale + offsetX, y: vy * scale + offsetY };
+}
+
+function ensureLabel(toteId) {
+  if (labelEls[toteId]) return labelEls[toteId];
+  const el = document.createElement("div");
+  el.className = "tote-label";
+  el.innerHTML = `<span class="title">Tote ${toteId}</span><span class="body">loading…</span>`;
+  labelsEl.appendChild(el);
+  labelEls[toteId] = el;
+  return el;
+}
+
+function updateLabelContent(toteId) {
+  const el = labelEls[toteId];
+  if (!el) return;
   const contents = toteData[toteId] || "(not in sheet yet)";
-  const canvas = makeLabelCanvas(`Tote ${toteId}`, contents);
-  mesh.material.map.dispose();
-  mesh.material.map = new THREE.CanvasTexture(canvas);
-  mesh.material.needsUpdate = true;
+  el.querySelector(".body").textContent = contents;
+}
+
+function placeLabel(toteId, code) {
+  const el = ensureLabel(toteId);
+  el.style.display = "block";
+  el.style.opacity = "1";
+
+  // centroid of the QR code, in video pixel space, mapped to screen space
+  const corners = [code.location.topLeftCorner, code.location.topRightCorner, code.location.bottomLeftCorner, code.location.bottomRightCorner];
+  const cx = corners.reduce((s, p) => s + p.x, 0) / 4;
+  const cy = corners.reduce((s, p) => s + p.y, 0) / 4;
+  const topY = Math.min(...corners.map(p => p.y));
+  const screenCentroid = videoToScreen(cx, cy);
+  const screenTop = videoToScreen(cx, topY);
+
+  el.style.left = `${screenCentroid.x}px`;
+  el.style.top = `${screenTop.y - 10}px`; // sits just above the code
+
+  // clamped scale: size the label based on how big the QR code
+  // appears on screen (bigger code = closer = can afford a bigger label)
+  const qrScreenWidth = Math.abs(videoToScreen(corners[1].x, corners[1].y).x - videoToScreen(corners[0].x, corners[0].y).x);
+  const labelWidth = Math.max(CONFIG.minLabelWidthPx, Math.min(CONFIG.maxLabelWidthPx, qrScreenWidth * 1.8));
+  el.style.width = `${labelWidth}px`;
 }
 
 /* ============================================================
-   AR SETUP
+   MAIN SCAN LOOP
    ============================================================ */
-async function start() {
-  const mindarThree = new MindARThree({
-    container: document.querySelector("#container"),
-    imageTargetSrc: CONFIG.targetFile,
-    maxTrack: CONFIG.toteIds.length,
-    filterMinCF: 0.01,     // much stronger smoothing (was 0.001)
-    filterBeta: 20,        // much less twitchy (was 100)
-    warmupTolerance: 25,   // require ~25 consistent frames before declaring "found" (was 10)
-    missTolerance: 20,     // allow ~20 missed frames before declaring "lost" (was 10)
-  });
+function start() {
+  const scanCanvas = document.createElement("canvas");
+  const scanCtx = scanCanvas.getContext("2d", { willReadFrequently: true });
 
-  const { scene, camera } = mindarThree;
+  function scanFrame() {
+    if (videoEl.videoWidth) {
+      scanCanvas.width = videoEl.videoWidth;
+      scanCanvas.height = videoEl.videoHeight;
+      scanCtx.drawImage(videoEl, 0, 0, scanCanvas.width, scanCanvas.height);
+      const imageData = scanCtx.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
+      const codes = findAllQRCodes(imageData, CONFIG.maxCodesPerFrame);
 
-  // Render into OUR OWN canvas (#ar-overlay) instead of MindAR's internal
-  // one — something about the internal canvas wasn't actually visible
-  // on screen despite correct z-index/stacking, so we sidestep it
-  // entirely with a canvas we fully control.
-  const arCanvas = document.getElementById("ar-overlay");
-  const renderer = new THREE.WebGLRenderer({ canvas: arCanvas, alpha: true, antialias: true });
-  renderer.setPixelRatio(window.devicePixelRatio || 1);
-  function resizeOverlay() {
-    renderer.setSize(window.innerWidth, window.innerHeight, false);
+      const now = performance.now();
+      const seenThisFrame = new Set();
+      for (const code of codes) {
+        const match = code.data.match(/(\d+)/);
+        if (!match) continue;
+        const toteId = parseInt(match[1], 10);
+        seenThisFrame.add(toteId);
+        lastSeen[toteId] = now;
+        updateLabelContent(toteId);
+        placeLabel(toteId, code);
+      }
+
+      // hide labels not seen recently (handles brief flicker without
+      // hiding/showing constantly, but still clears stale ones)
+      for (const toteId of Object.keys(lastSeen)) {
+        const el = labelEls[toteId];
+        if (!el) continue;
+        if (now - lastSeen[toteId] > CONFIG.labelTTLms) {
+          el.style.opacity = "0";
+          el.style.display = "none";
+        }
+      }
+
+      const activeCount = Object.keys(lastSeen).filter(id => now - lastSeen[id] <= CONFIG.labelTTLms).length;
+      setStatus(activeCount ? `Tracking ${activeCount} tote(s)` : "Point camera at a tote QR code", activeCount ? "ok" : "");
+    }
+    setTimeout(scanFrame, CONFIG.scanIntervalMs);
   }
-  resizeOverlay();
-  window.addEventListener("resize", resizeOverlay);
-
-  // TEMPORARY: fully opaque magenta clear, to prove this canvas
-  // is visible at all, independent of any object position math.
-  renderer.setClearColor(0x000000, 0);
-
-  // Soft light so canvas textures render true-color
-  scene.add(new THREE.AmbientLight(0xffffff, 1.0));
-
-  CONFIG.toteIds.forEach((toteId, index) => {
-    const anchor = mindarThree.addAnchor(index);
-    anchorRefs[toteId] = anchor;
-
-    // Parent the label to the anchor group, like MindAR expects — this
-    // is what makes position/scale come out correct automatically.
-    // Each frame, we still cancel out the anchor's rotation so the
-    // label faces the camera flat (billboard) instead of tilting with
-    // the tote, without fighting the coordinate system.
-    const canvas = makeLabelCanvas(`Tote ${toteId}`, "loading…");
-    const texture = new THREE.CanvasTexture(canvas);
-    const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide });
-    const geometry = new THREE.PlaneGeometry(CONFIG.labelWidth, CONFIG.labelHeight);
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.visible = false;
-    mesh.position.set(0, 0.75, 0); // sits just above the marker, in the anchor's local space
-    labelMeshes[toteId] = mesh;
-    anchor.group.add(mesh);
-
-    anchor.onTargetFound = () => {
-      visibleTotes.add(toteId);
-      mesh.visible = true;
-      updateLabelText(toteId);
-      setStatus(`Tracking ${visibleTotes.size} tote(s)`, "ok");
-    };
-    anchor.onTargetLost = () => {
-      visibleTotes.delete(toteId);
-      mesh.visible = false;
-      setStatus(visibleTotes.size ? `Tracking ${visibleTotes.size} tote(s)` : "Point camera at a tote marker");
-    };
-  });
-
-  console.log("DIAG: calling mindarThree.start()...");
-  await mindarThree.start();
-  console.log("DIAG: mindarThree.start() resolved OK");
-  setStatus("Point camera at a tote marker");
-  refreshSheetData();
-  setInterval(refreshSheetData, CONFIG.refreshMs);
-
-  const camWorldQuat = new THREE.Quaternion();
-  const anchorWorldQuat = new THREE.Quaternion();
-  let diagFrameLogged = false;
-
-  renderer.setAnimationLoop(() => {
-    if (!diagFrameLogged) {
-      diagFrameLogged = true;
-      console.log("DIAG: render loop is running, first frame fired");
-    }
-    camera.updateWorldMatrix(true, false);
-    camera.getWorldQuaternion(camWorldQuat);
-
-    for (const toteId of CONFIG.toteIds) {
-      const anchor = anchorRefs[toteId];
-      const mesh = labelMeshes[toteId];
-      if (!mesh.visible) continue;
-
-      // billboard: cancel out the anchor's own rotation, then apply the
-      // camera's, so the label ends up facing the camera flat instead
-      // of tilting with the tote — while position/scale still come
-      // from the normal parent-child transform (correct units).
-      anchor.group.getWorldQuaternion(anchorWorldQuat);
-      mesh.quaternion.copy(anchorWorldQuat.clone().invert().multiply(camWorldQuat));
-    }
-
-    renderer.render(scene, camera);
-  });
+  scanFrame();
 }
 
-start().catch(err => {
-  console.error(err);
-  setStatus("Camera/AR failed to start — check console + camera permissions", "err");
-});
+/* ============================================================
+   BOOT
+   ============================================================ */
+(async () => {
+  try {
+    await startCamera();
+    setStatus("Point camera at a tote QR code");
+    refreshSheetData();
+    setInterval(refreshSheetData, CONFIG.refreshMs);
+    start();
+  } catch (err) {
+    console.error(err);
+    setStatus("Camera failed to start — check console + camera permissions", "err");
+  }
+})();
 </script>
 </body>
 </html>
